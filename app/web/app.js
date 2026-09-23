@@ -294,6 +294,12 @@ function syncTabs() {
 
 function renderCount(d) {
   if (state.scope === 'live') {
+    if (d.unavailable) {
+      el('resCount').textContent = '🌐 全球学术检索 · 数据源暂时不可用';
+      el('mobarCount').textContent = '暂不可用';
+      el('btnSheetApply').textContent = '暂时无法检索';
+      return;
+    }
     var srcName = (d.source === 'openalex') ? 'OpenAlex 全球索引' :
                   (d.source === 'crossref' ? 'Crossref 官方检索' : '');
     var qLabel = state.q ? ('「' + esc(state.q) + '」') : '输入主题开始';
@@ -652,7 +658,10 @@ function renderResults(d, append) {
   var box = el('reclist');
   if (!d.papers.length && !append) {
     if (state.scope === 'live') {
-      box.innerHTML = !state.q
+      box.innerHTML = d.unavailable
+        ? '<div class="empty"><h3>学术索引暂时无法访问</h3>' +
+          '<p>OpenAlex 和 Crossref 当前都没有返回有效结果，请稍后重试。</p></div>'
+        : !state.q
         ? '<div class="empty"><h3>搜索任何学科的最新论文</h3>' +
           '<p>输入研究主题、方法或关键词。试试 ' +
           '<button type="button" class="example-query" data-example="固态电池">固态电池</button> ' +
