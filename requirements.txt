@@ -1,0 +1,3 @@
+# Literature Radar (文献雷达)
+# 本项目使用纯 Python 标准库开发，无需通过 pip install 安装任何第三方依赖！
+# 运行环境要求：Python >= 3.8

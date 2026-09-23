@@ -1,0 +1,11 @@
+{
+  "_说明": "把本文件复制为 settings.json 后按需修改；所有键都可省略，省略即用缺省值。",
+  "contact_email": "your.name@example.com",
+  "elsevier_api_key": "",
+  "server_port": 8756,
+  "refresh_window_days": 21,
+  "backfill_days": 90,
+  "auto_refresh_after_hours": 8,
+  "max_journal_tier": 3,
+  "open_browser": true
+}
