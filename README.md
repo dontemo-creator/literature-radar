@@ -28,7 +28,9 @@ cd "路径/paper search"
 python3 run.py
 ```
 
-浏览器会自动打开 `http://127.0.0.1:8756/`。macOS 也可以直接双击 **`start.command`**。
+浏览器会自动打开 `http://127.0.0.1:8756/`。macOS 本地开发目录可双击
+**`start.command`**；从 GitHub 获取的版本如未保留可执行权限，可运行
+`bash start.command`。
 
 **第一次打开**先创建本地账号，然后就能直接搜索：
 
