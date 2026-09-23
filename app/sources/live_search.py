@@ -51,8 +51,15 @@ def _search_terms(q: str) -> str:
     }, timeout=4, retries=0, cache_ttl=7 * 86400)
     if not resp.ok:
         return q
-    for hit in (resp.json() or {}).get("search") or []:
+    data = resp.json()
+    if not isinstance(data, dict):
+        return q
+    for hit in data.get("search") or []:
+        if not isinstance(hit, dict):
+            continue
         match = hit.get("match") or {}
+        if not isinstance(match, dict):
+            continue
         label = (hit.get("label") or "").strip()
         desc = (hit.get("description") or "").lower()
         if (match.get("text") == q and label and
@@ -109,12 +116,23 @@ def _search_openalex(q: str, page: int = 1, page_size: int = 25, sort: str = "re
         log.warning("OpenAlex search failed with %d: %s", resp.status, resp.error)
         return None
 
-    data = resp.json() or {}
-    results = data.get("results") or []
-    total = int((data.get("meta") or {}).get("count") or len(results))
+    data = resp.json()
+    if (not isinstance(data, dict) or
+            not isinstance(data.get("results"), list) or
+            not isinstance(data.get("meta"), dict)):
+        log.warning("OpenAlex returned an invalid search response")
+        return None
+    results = data["results"]
+    try:
+        total = int(data["meta"].get("count") or len(results))
+    except (TypeError, ValueError):
+        log.warning("OpenAlex returned an invalid result count")
+        return None
 
     papers = []
     for item in results:
+        if not isinstance(item, dict):
+            continue
         raw_doi = item.get("doi") or ""
         doi = raw_doi.replace("https://doi.org/", "").strip().lower()
         if not doi:
@@ -185,7 +203,7 @@ def _search_openalex(q: str, page: int = 1, page_size: int = 25, sort: str = "re
     return {"papers": papers, "total": total, "source": "openalex"}
 
 
-def _search_crossref(q: str, page: int = 1, page_size: int = 25, sort: str = "relevance") -> dict:
+def _search_crossref(q: str, page: int = 1, page_size: int = 25, sort: str = "relevance") -> Optional[dict]:
     """Fallback search using Crossref Works API."""
     rows = max(5, min(50, int(page_size)))
     offset = (max(1, int(page)) - 1) * rows
@@ -205,14 +223,24 @@ def _search_crossref(q: str, page: int = 1, page_size: int = 25, sort: str = "re
     resp = http_client.request(CROSSREF_API, params=params, timeout=12, retries=1)
     if not resp.ok:
         log.warning("Crossref fallback search failed: %s", resp.error)
-        return {"papers": [], "total": 0, "source": "crossref"}
+        return None
 
-    msg = (resp.json() or {}).get("message") or {}
-    items = msg.get("items") or []
-    total = int(msg.get("total-results") or len(items))
+    data = resp.json()
+    msg = data.get("message") if isinstance(data, dict) else None
+    if not isinstance(msg, dict) or not isinstance(msg.get("items"), list):
+        log.warning("Crossref returned an invalid search response")
+        return None
+    items = msg["items"]
+    try:
+        total = int(msg.get("total-results") or len(items))
+    except (TypeError, ValueError):
+        log.warning("Crossref returned an invalid result count")
+        return None
 
     papers = []
     for item in items:
+        if not isinstance(item, dict):
+            continue
         doi = (item.get("DOI") or "").strip().lower()
         if not doi:
             continue
@@ -276,6 +304,9 @@ def query_global(q: str, page: int = 1, page_size: int = 25, sort: str = "releva
     if result is None:
         log.info("OpenAlex unavailable, falling back to Crossref for '%s'", q)
         result = _search_crossref(terms, page=page, page_size=page_size, sort=sort)
+    if result is None:
+        result = {"papers": [], "total": 0, "source": "unavailable",
+                  "unavailable": True}
 
     result["page"] = page
     result["page_size"] = page_size
