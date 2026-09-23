@@ -46,11 +46,13 @@ class Client:
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(self.jar))
 
-    def hit(self, path, method="GET", body=None, agent="TestClient/1.0"):
+    def hit(self, path, method="GET", body=None, agent="TestClient/1.0",
+            headers=None):
         data = json.dumps(body).encode() if body is not None else None
+        req_headers = {"Content-Type": "application/json", "User-Agent": agent}
+        req_headers.update(headers or {})
         req = urllib.request.Request(BASE + path, data=data, method=method,
-                                     headers={"Content-Type": "application/json",
-                                              "User-Agent": agent})
+                                     headers=req_headers)
         try:
             with self.opener.open(req, timeout=25) as r:
                 raw = r.read().decode("utf-8", "replace")
@@ -116,6 +118,21 @@ def run():
         check("首次运行没有账号", st["has_users"], False)
         check("未认证", st["authenticated"], False)
 
+        print("\n== 请求来源保护 ==")
+        check("跨站页面不能创建账号",
+              anon.hit("/api/auth/register", "POST",
+                       {"username": "attacker", "password": "a-long-secret"},
+                       headers={"Origin": "https://evil.example"})[0], 403)
+        check("跨站请求后仍无账号", anon.hit("/api/auth/state")[1]["has_users"], False)
+        check("非 JSON 请求不能创建账号",
+              anon.hit("/api/auth/register", "POST",
+                       {"username": "attacker", "password": "a-long-secret"},
+                       headers={"Content-Type": "text/plain"})[0], 415)
+        check("伪造跨站 Fetch Metadata 被拒绝",
+              anon.hit("/api/auth/register", "POST",
+                       {"username": "attacker", "password": "a-long-secret"},
+                       headers={"Sec-Fetch-Site": "cross-site"})[0], 403)
+
         print("\n== 注册与登录 ==")
         code, d = anon.hit("/api/auth/register", "POST",
                            {"username": "ab", "password": "a-good-secret"})
@@ -128,6 +145,13 @@ def run():
                           {"username": "alice", "password": "a-good-long-secret",
                            "display_name": "爱丽丝"}, agent="Mozilla/5.0 (Macintosh)")
         check("注册成功", code, 200)
+        check("同源 Origin 可正常提交",
+              mac.hit("/api/auth/logout", "POST", {},
+                      headers={"Origin": BASE})[0], 200)
+        check("登出后可重新登录",
+              mac.hit("/api/auth/login", "POST",
+                      {"username": "alice", "password": "a-good-long-secret"},
+                      headers={"Origin": BASE})[0], 200)
         truthy("下发了会话 cookie", "ssb_session" in mac.cookies())
         cookie = mac.cookies()["ssb_session"]
         truthy("cookie 是 HttpOnly", cookie.has_nonstandard_attr("HttpOnly"))

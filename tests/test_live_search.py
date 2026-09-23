@@ -141,6 +141,27 @@ class TestLiveSearch(unittest.TestCase):
         self.assertIn("ImageNet Classification", p["title"])
         self.assertEqual(p["cited_by"], 110000)
 
+    @patch("app.http_client.request")
+    def test_both_sources_unavailable_is_not_reported_as_no_papers(self, mock_req):
+        mock_req.return_value = MagicMock(ok=False, status=503, error="unavailable")
+        res = live_search.query_global("quantum computing", sort="date")
+        self.assertEqual(mock_req.call_count, 2)
+        self.assertTrue(res["unavailable"])
+        self.assertEqual(res["source"], "unavailable")
+        self.assertEqual(res["papers"], [])
+
+    @patch("app.http_client.request")
+    def test_malformed_primary_response_uses_crossref(self, mock_req):
+        malformed = MagicMock(ok=True)
+        malformed.json.return_value = {"unexpected": "shape"}
+        backup = MagicMock(ok=True)
+        backup.json.return_value = {"message": {"items": [], "total-results": 0}}
+        mock_req.side_effect = [malformed, backup]
+        res = live_search.query_global("microbiome")
+        self.assertEqual(res["source"], "crossref")
+        self.assertEqual(res["total"], 0)
+        self.assertFalse(res.get("unavailable", False))
+
 
 if __name__ == "__main__":
     unittest.main()
