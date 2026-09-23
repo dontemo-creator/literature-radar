@@ -367,6 +367,22 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError, OSError):
             return {}
 
+    def _same_origin_post(self) -> bool:
+        """Reject browser POSTs initiated by another site."""
+        fetch_site = (self.headers.get("Sec-Fetch-Site") or "").lower()
+        if fetch_site and fetch_site not in ("same-origin", "none"):
+            return False
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True  # Non-browser clients still need to send JSON.
+        try:
+            parsed = urllib.parse.urlsplit(origin)
+        except ValueError:
+            return False
+        return (parsed.scheme in ("http", "https") and
+                parsed.netloc.casefold() == (self.headers.get("Host") or "").casefold() and
+                not parsed.path and not parsed.query and not parsed.fragment)
+
     # ---- session ---------------------------------------------------------
     def _token(self) -> str:
         raw = self.headers.get("Cookie") or ""
@@ -469,7 +485,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "not found", "path": route}, 404)
         except Exception as exc:
             log.error("GET %s failed: %s\n%s", self.path, exc, traceback.format_exc())
-            return self._json({"error": "internal error", "detail": str(exc)}, 500)
+            return self._json({"error": "internal error"}, 500)
 
     def do_HEAD(self):
         self.do_GET()
@@ -478,6 +494,12 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlsplit(self.path)
         route = parsed.path.rstrip("/") or "/"
         try:
+            if not self._same_origin_post():
+                return self._json({"error": "cross-origin POST rejected"}, 403)
+            content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0]
+            content_type = content_type.strip().lower()
+            if content_type != "application/json":
+                return self._json({"error": "JSON content type required"}, 415)
             body = self._read_body()
 
             # --- public auth routes
@@ -537,7 +559,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "not found", "path": route}, 404)
         except Exception as exc:
             log.error("POST %s failed: %s\n%s", self.path, exc, traceback.format_exc())
-            return self._json({"error": "internal error", "detail": str(exc)}, 500)
+            return self._json({"error": "internal error"}, 500)
 
     # ---- auth helpers ----------------------------------------------------
     def _register(self, body: dict):
