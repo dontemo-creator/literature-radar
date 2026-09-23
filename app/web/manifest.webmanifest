@@ -1,0 +1,68 @@
+{
+  "name": "文献雷达",
+  "short_name": "文献雷达",
+  "description": "搜索各学科最新论文，并按自选研究方向定向追踪文献。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "portrait-primary",
+  "background_color": "#edeff3",
+  "theme_color": "#232c3c",
+  "categories": [
+    "education",
+    "news",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/icon-256.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/icon-384.png",
+      "sizes": "384x384",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/static/icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "今日新推送",
+      "short_name": "新推送",
+      "url": "/#new_only=1"
+    },
+    {
+      "name": "我的收藏",
+      "short_name": "收藏",
+      "url": "/#starred=1"
+    }
+  ]
+}

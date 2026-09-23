@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>文献雷达</title>
+
+<!-- installable web app: standalone window, home-screen icon, themed chrome -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#232c3c">
+<meta name="color-scheme" content="light">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="文献雷达">
+<meta name="format-detection" content="telephone=no">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/static/icons/favicon-16.png">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<!-- ===== gate 1: accounts.  The phone and the laptop share one library,
+     so the server has to know who is asking. ===== -->
+<div class="gate" id="authView" hidden>
+  <div class="gate-bg" aria-hidden="true"></div>
+  <div class="gate-card">
+    <div class="gate-brand">
+      <span class="brand-mark lg" aria-hidden="true">
+        <svg width="46" height="46" viewBox="0 0 34 34" fill="none">
+          <rect width="34" height="34" rx="10.5" fill="url(#glg)"/>
+          <path d="M8.5 24.5a10 10 0 0 1 10-10" stroke="#fff" stroke-opacity=".5"
+                stroke-width="1.7" stroke-linecap="round"/>
+          <path d="M8.5 24.5a16 16 0 0 1 16-16" stroke="#fff" stroke-opacity=".26"
+                stroke-width="1.7" stroke-linecap="round"/>
+          <circle cx="8.5" cy="24.5" r="2.4" fill="#fff"/>
+          <circle cx="24" cy="9.5" r="3.1" fill="#ffce8a"/>
+          <circle cx="24" cy="9.5" r="5.4" fill="#ffce8a" fill-opacity=".22"/>
+          <defs><linearGradient id="glg" x1="0" y1="0" x2="34" y2="34">
+            <stop stop-color="#4d8ada"/><stop offset="1" stop-color="#28518f"/>
+          </linearGradient></defs>
+        </svg>
+      </span>
+      <div>
+        <h1 class="gate-title">文献雷达</h1>
+        <p class="gate-sub" id="authSub">登录后手机与电脑共享同一份文献库</p>
+      </div>
+    </div>
+
+    <form class="gate-form" id="authForm" autocomplete="on">
+      <label class="field">
+        <span class="field-label">用户名</span>
+        <input id="authUser" type="text" name="username" autocapitalize="none"
+               autocorrect="off" spellcheck="false" autocomplete="username"
+               inputmode="latin" placeholder="英文字母、数字、下划线" required>
+      </label>
+      <label class="field">
+        <span class="field-label">密码</span>
+        <span class="field-wrap">
+          <input id="authPass" type="password" name="password"
+                 autocomplete="current-password" placeholder="至少 8 位" required>
+          <button class="reveal" id="btnReveal" type="button" tabindex="-1"
+                  aria-label="显示密码">显示</button>
+        </span>
+      </label>
+      <label class="field" id="authNameRow" hidden>
+        <span class="field-label">显示名称 <i>（可选）</i></span>
+        <input id="authName" type="text" autocomplete="nickname" placeholder="例如 电池学者">
+      </label>
+      <p class="gate-err" id="authErr" hidden></p>
+      <button class="btn-fill" id="btnAuth" type="submit">登录</button>
+      <p class="gate-switch" id="authSwitchRow">
+        <span id="authSwitchText">还没有账号？</span>
+        <button type="button" id="btnAuthSwitch">创建账号</button>
+      </p>
+    </form>
+    <p class="gate-foot">账号只保存在你这台电脑的数据库里，不会上传到任何服务器。</p>
+  </div>
+</div>
+
+<!-- ===== gate 2: which direction do you work on? ===== -->
+<div class="gate wide" id="onboardView" hidden>
+  <div class="gate-bg" aria-hidden="true"></div>
+  <div class="onboard">
+    <header class="onboard-head">
+      <button class="ob-back" id="btnObBack" type="button" hidden>← 返回文献列表</button>
+      <p class="onboard-kicker" id="obKicker">可选功能</p>
+      <h1 class="onboard-title">设置定向文献追踪</h1>
+      <p class="onboard-sub">全球检索可以直接搜索任何学科。选定方向后，软件还会定期抓取该方向的期刊新文献并分类；之后可随时切换。</p>
+    </header>
+
+    <div class="fieldgrid" id="fieldGrid"></div>
+
+    <details class="custom" id="customBox">
+      <summary>
+        <span class="custom-ico" aria-hidden="true">✎</span>
+        <span>
+          <b>都不是？自定义一个方向</b>
+          <i>用关键词描述你的方向，软件按同样的规则筛选和分类</i>
+        </span>
+      </summary>
+      <div class="custom-body">
+        <label class="field">
+          <span class="field-label">方向名称</span>
+          <input id="cfName" type="text" placeholder="例如：锂硫电池" maxlength="24">
+        </label>
+        <label class="field">
+          <span class="field-label">核心关键词
+            <i>（英文，逗号分隔；越具体越准，建议用词组）</i></span>
+          <textarea id="cfKw" rows="2"
+            placeholder="lithium-sulfur battery, polysulfide, sulfur cathode"></textarea>
+        </label>
+        <div class="cf-cats" id="cfCats"></div>
+        <button class="btn-ghost" id="btnAddCat" type="button">+ 添加一个分类</button>
+        <label class="field">
+          <span class="field-label">要排除的方向 <i>（可选，逗号分隔）</i></span>
+          <input id="cfExclude" type="text" placeholder="fuel cell, solar cell">
+        </label>
+        <p class="cf-hint">分类用于左侧的筛选栏。例如「正极 / cathode, sulfur host」「电解液 /
+          electrolyte, ether solvent」。留空则只做相关性筛选，不分类。</p>
+        <p class="gate-err" id="cfErr" hidden></p>
+        <button class="btn-fill" id="btnCustom" type="button">用这个方向开始</button>
+      </div>
+    </details>
+
+    <p class="onboard-foot" id="obFoot">
+      选好后需要一到两分钟从 Crossref 拉取近期文献，期间可以先浏览已有内容。
+    </p>
+  </div>
+</div>
+
+<!-- ===== account panel: devices + password ===== -->
+<div class="gate" id="acctView" hidden>
+  <div class="gate-bg" aria-hidden="true"></div>
+  <div class="gate-card">
+    <div class="acct-head">
+      <h2 class="gate-title" style="font-size:18px">账号设置</h2>
+      <button class="sheet-x" id="btnAcctClose" type="button" aria-label="关闭">✕</button>
+    </div>
+
+    <section class="acct-sec">
+      <h3 class="acct-h">已登录设备</h3>
+      <div class="devlist" id="devList">正在读取…</div>
+      <button class="btn-ghost" id="btnRevoke" type="button">退出其他所有设备</button>
+    </section>
+
+    <section class="acct-sec">
+      <h3 class="acct-h">修改密码</h3>
+      <form class="gate-form" id="pwForm">
+        <label class="field">
+          <span class="field-label">当前密码</span>
+          <input id="pwOld" type="password" autocomplete="current-password" required>
+        </label>
+        <label class="field">
+          <span class="field-label">新密码 <i>（至少 8 位）</i></span>
+          <input id="pwNew" type="password" autocomplete="new-password" required>
+        </label>
+        <label class="field">
+          <span class="field-label">再输一次</span>
+          <input id="pwNew2" type="password" autocomplete="new-password" required>
+        </label>
+        <p class="gate-err" id="pwErr" hidden></p>
+        <button class="btn-fill" id="btnPw" type="submit">更新密码</button>
+      </form>
+    </section>
+  </div>
+</div>
+
+<div id="appView" hidden>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
+          <rect width="34" height="34" rx="10.5" fill="url(#lg)"/>
+          <rect width="34" height="34" rx="10.5" fill="url(#sheen)"/>
+          <path d="M8.5 24.5a10 10 0 0 1 10-10" stroke="#fff" stroke-opacity=".5"
+                stroke-width="1.7" stroke-linecap="round"/>
+          <path d="M8.5 24.5a16 16 0 0 1 16-16" stroke="#fff" stroke-opacity=".26"
+                stroke-width="1.7" stroke-linecap="round"/>
+          <path d="M8.5 24.5L24 9.5" stroke="#fff" stroke-opacity=".22" stroke-width="1.2"
+                stroke-linecap="round" stroke-dasharray="2 3"/>
+          <circle cx="8.5" cy="24.5" r="2.4" fill="#fff"/>
+          <circle cx="24" cy="9.5" r="3.1" fill="#ffce8a"/>
+          <circle cx="24" cy="9.5" r="5.4" fill="#ffce8a" fill-opacity=".22"/>
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="34" y2="34">
+              <stop stop-color="#4d8ada"/><stop offset="1" stop-color="#28518f"/>
+            </linearGradient>
+            <linearGradient id="sheen" x1="0" y1="0" x2="14" y2="34">
+              <stop stop-color="#fff" stop-opacity=".18"/>
+              <stop offset=".6" stop-color="#fff" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </span>
+      <span class="brand-text">
+        <span class="brand-zh" id="brandZh">文献雷达</span>
+        <span class="brand-en" id="brandEn">Literature Radar</span>
+      </span>
+      <button class="fieldchip" id="btnField" type="button" title="切换研究方向">
+        <span class="fieldchip-ico" id="fieldIco" aria-hidden="true">🔋</span>
+        <span class="fieldchip-name" id="fieldName">—</span>
+        <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.8L5 6.8l3-3"
+          stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"
+          stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <div class="masthead-spacer"></div>
+    <div class="masthead-meta" id="mastMeta"></div>
+    <button class="hdr-btn" id="btnRefresh" type="button">
+      <svg class="ico" width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <path d="M12.2 7a5.2 5.2 0 1 1-1.6-3.75" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round"/>
+        <path d="M12.4 1.4v2.6h-2.6" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>立即更新</span>
+    </button>
+    <button class="avatar" id="btnAccount" type="button" aria-haspopup="menu"
+            aria-expanded="false" title="账号">
+      <span id="avatarText">·</span>
+    </button>
+  </div>
+
+  <div class="menu" id="accountMenu" role="menu" hidden>
+    <div class="menu-head">
+      <div class="menu-name" id="menuName">—</div>
+      <div class="menu-sub" id="menuSub">—</div>
+    </div>
+    <button class="menu-item" type="button" data-act="field" role="menuitem">
+      切换研究方向
+    </button>
+    <button class="menu-item" type="button" data-act="password" role="menuitem">
+      修改密码
+    </button>
+    <button class="menu-item" type="button" data-act="devices" role="menuitem">
+      已登录设备<span class="menu-tail" id="menuDevices"></span>
+    </button>
+    <div class="menu-sep"></div>
+    <button class="menu-item danger" type="button" data-act="logout" role="menuitem">
+      退出登录
+    </button>
+  </div>
+</header>
+
+<div class="searchbar">
+  <div class="search-scope-bar">
+    <div class="search-scope-tabs" role="tablist">
+      <button class="scope-tab active" id="tabScopeLocal" type="button" role="tab" aria-selected="true" data-scope="local">本方向雷达</button>
+      <button class="scope-tab" id="tabScopeLive" type="button" role="tab" aria-selected="false" data-scope="live">全球学术检索 🌐</button>
+    </div>
+  </div>
+  <div class="searchbar-inner">
+    <div class="search-field">
+      <span class="search-icon" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+          <circle cx="6.6" cy="6.6" r="4.6" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M10.2 10.2L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <input id="q" type="search" autocomplete="off" spellcheck="false"
+             enterkeyhint="search" placeholder="检索标题、摘要、期刊、作者"
+             aria-label="检索文献">
+      <button class="clear-x" id="btnClearQ" type="button" title="清除" aria-label="清除检索词">✕</button>
+    </div>
+    <button class="btn-primary" id="btnSearch" type="button">检索</button>
+    <button class="btn-quiet" id="btnReset" type="button">重置</button>
+  </div>
+  <div class="syntax-hint">
+    多词为「与」关系 <code>Li6PS5Cl interface</code>　·　词组加引号
+    <code>"stack pressure"</code>　·　单词自动前缀匹配 <code>garnet</code>
+  </div>
+</div>
+
+<!-- phone-only control strip: result count, filter trigger, active conditions -->
+<div class="mobar" id="mobar">
+  <button class="mobar-btn" id="btnSheet" type="button">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" stroke-width="1.7"
+            stroke-linecap="round"/>
+    </svg>
+    <span>筛选</span><span class="mobar-badge" id="mobarBadge" hidden>0</span>
+  </button>
+  <div class="mobar-count" id="mobarCount">—</div>
+  <div class="mobar-spacer"></div>
+  <select id="sortMobile" aria-label="排序">
+    <option value="date">最新发表</option>
+    <option value="new">最新入库</option>
+    <option value="relevance">相关度</option>
+    <option value="journal">期刊等级</option>
+    <option value="cited">被引</option>
+  </select>
+</div>
+
+<div class="notice-wrap" id="notices" aria-live="polite"></div>
+
+<main class="shell">
+  <aside class="rail" id="rail" aria-label="精炼结果">
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <div class="rail-head">
+      <span class="rail-title">精炼结果</span>
+      <button class="link-btn" id="btnClearFacets" type="button">清除筛选</button>
+      <button class="sheet-x" id="btnSheetClose" type="button" aria-label="关闭筛选">✕</button>
+    </div>
+    <div id="facets"></div>
+    <div class="sheet-foot">
+      <button class="btn-primary btn-block" id="btnSheetApply" type="button">查看结果</button>
+    </div>
+  </aside>
+
+  <section class="results">
+    <div class="resbar">
+      <div class="rescount" id="resCount">正在载入…</div>
+      <div class="resbar-spacer"></div>
+      <div class="selwrap">
+        <label for="sort">排序</label>
+        <select id="sort">
+          <option value="date">出版日期：最新优先</option>
+          <option value="new">入库时间：最新优先</option>
+          <option value="relevance">相关度</option>
+          <option value="journal">期刊等级 / 影响因子</option>
+          <option value="cited">被引次数</option>
+          <option value="title">标题 A→Z</option>
+        </select>
+      </div>
+      <div class="selwrap">
+        <label for="pageSize">每页</label>
+        <select id="pageSize">
+          <option value="25">25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="activefilters" id="activeFilters" hidden></div>
+    <div class="reclist" id="reclist"></div>
+    <div class="pager" id="pager"></div>
+    <button class="loadmore" id="btnLoadMore" type="button" hidden></button>
+  </section>
+</main>
+
+<div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+
+<!-- phone-only bottom navigation -->
+<nav class="tabbar" id="tabbar" aria-label="视图切换">
+  <button type="button" data-tab="all" class="on">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h9"
+      stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>
+    <span>全部</span>
+  </button>
+  <button type="button" data-tab="new">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l2.1 4.6 5 .6-3.7 3.4 1 5-4.4-2.5
+      -4.4 2.5 1-5L2.9 7.7l5-.6z" stroke="currentColor" stroke-width="1.5" fill="none"
+      stroke-linejoin="round"/></svg>
+    <span>新推送</span><i class="tab-dot" id="tabDot" hidden></i>
+  </button>
+  <button type="button" data-tab="unread">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4.5" width="15" height="11"
+      rx="2.2" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M3 6l7 5 7-5"
+      stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+    <span>未读</span>
+  </button>
+  <button type="button" data-tab="star">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8l2.3 4.7 5.2.7-3.8 3.7.9 5.2
+      -4.6-2.5-4.6 2.5.9-5.2L2.5 8.2l5.2-.7z" stroke="currentColor" stroke-width="1.5"
+      fill="none" stroke-linejoin="round"/></svg>
+    <span>收藏</span>
+  </button>
+</nav>
+
+<div class="footnote">
+  <div class="footnote-global"><b>数据来源</b> OpenAlex 学术索引；服务不可用时改用 Crossref。
+    检索结果取决于数据源收录进度，可能漏掉刚发表的论文。英文关键词通常能获得更完整的结果。</div>
+  <div class="footnote-local">
+    <b>数据来源</b> Crossref（元数据与摘要）<span class="sep">·</span>Europe PMC
+    <span class="sep">·</span>Elsevier 官方接口（需自备 key）<span class="sep">·</span>OpenAlex；
+    仍缺失的摘要会在后续更新中继续重试。
+    <br>
+    <b>收录范围</b> <span id="fnJournals">—</span> 种高质量期刊，按<span id="fnField">所选方向</span>的相关性规则筛选后自动分类；
+    分类由关键词规则判定，可能存在偏差，请以原文为准。
+    <span class="sep">·</span><b>影响因子</b> 为近期 JCR 参考值，仅用于排序与展示。
+  </div>
+</div>
+
+</div><!-- /#appView -->
+
+<script src="/static/app.js"></script>
+</body>
+</html>
