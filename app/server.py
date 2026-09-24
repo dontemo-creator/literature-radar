@@ -242,7 +242,9 @@ def api_search_live(user: Optional[dict], params: dict) -> dict:
     page = _as_int(one("page", "1"), 1, 1, 1000)
     page_size = _as_int(one("page_size", "25"), 25, 5, 50)
     sort = one("sort", "relevance")
-    res = live_search.query_global(q, page=page, page_size=page_size, sort=sort)
+    mode = one("mode", "broad")
+    res = live_search.query_global(q, page=page, page_size=page_size, sort=sort,
+                                   mode=mode)
     if res.get("papers") and user:
         dois = [p["doi"] for p in res["papers"]]
         flag_map = store.user_flag_map(user["id"], dois)
@@ -251,6 +253,16 @@ def api_search_live(user: Optional[dict], params: dict) -> dict:
             p["starred"] = f.get("starred", False)
             p["read_at"] = f.get("read_at", "")
     return res
+
+
+def api_search_classics(params: dict) -> dict:
+    one = lambda k, d="": (params.get(k) or [d])[0]
+    return live_search.query_classics(one("q")[:200], mode=one("mode", "broad"))
+
+
+def api_search_hot(params: dict) -> dict:
+    one = lambda k, d="": (params.get(k) or [d])[0]
+    return live_search.query_hot(one("q")[:200], mode=one("mode", "broad"))
 
 
 def api_save_paper(user: dict, body: dict) -> dict:
@@ -456,6 +468,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(api_search(user, params))
                 if route == "/api/search/live":
                     return self._json(api_search_live(user, params))
+                if route == "/api/search/classics":
+                    return self._json(api_search_classics(params))
+                if route == "/api/search/hot":
+                    return self._json(api_search_hot(params))
                 if route == "/api/fields":
                     return self._json(api_fields(user))
                 if route == "/api/status":

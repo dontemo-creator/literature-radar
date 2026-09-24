@@ -5,6 +5,7 @@ from __future__ import annotations
 import pathlib
 import sys
 import unittest
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -24,6 +25,205 @@ class TestLiveSearch(unittest.TestCase):
     def test_chinese_subject_aliases(self):
         self.assertIn('solid-state battery', live_search._search_terms("固态电池"))
         self.assertIn('machine learning algorithm', live_search._search_terms("AI算法"))
+
+    def test_detailed_chinese_query_requires_each_supported_concept(self):
+        q = "固态电池 硫化物电解质 界面稳定性"
+        terms = live_search._precise_terms(q)
+        self.assertIn(" AND ", terms)
+        self.assertIn("sulfide electrolyte", terms)
+        self.assertGreater(live_search._topic_strength(q, terms, {
+            "title": "Interfacial stability in sulfide-electrolyte solid-state batteries",
+            "abstract": "",
+        }, "precise"), 0)
+        self.assertEqual(live_search._topic_strength(q, terms, {
+            "title": "Sulfide-electrolyte solid-state batteries", "abstract": "",
+        }, "precise"), 0)
+
+    def test_classic_title_match_keeps_chinese_substring(self):
+        self.assertTrue(live_search._classic_title_match(
+            "基因编辑", "基因编辑", "基因编辑技术的发展", "broad"))
+
+    def test_classic_methods_cover_multiple_disciplines(self):
+        cases = [
+            ("AI算法", "Scikit-learn: Machine Learning in Python", True),
+            ("基因编辑", "A programmable dual-RNA-guided DNA endonuclease", False),
+            ("基因编辑", "Genome editing with CRISPR-Cas9", True),
+            ("量子计算", "Noisy intermediate-scale quantum computing", True),
+            ("量子计算", "Quantum chemistry of water", False),
+        ]
+        for query, title, expected in cases:
+            with self.subTest(query=query, title=title):
+                terms = live_search._search_terms(query) if query == "AI算法" else query
+                strength = live_search._classic_strength(
+                    query, terms, {"title": title, "abstract": ""}, "broad")
+                self.assertEqual(strength >= 4, expected)
+        foundational = live_search._classic_strength(
+            "基因编辑", '"gene editing"', {
+                "title": "A Programmable Dual-RNA-Guided DNA Endonuclease",
+                "primary_node": "CRISPR and Genetic Engineering",
+            }, "broad")
+        self.assertGreaterEqual(foundational, 4)
+
+    @patch("app.sources.live_search._search_openalex")
+    @patch("app.sources.live_search._search_terms", return_value='"gene editing"')
+    def test_gene_classics_include_foundational_crispr_papers(self, _mock_terms, mock_search):
+        older = f"{live_search.date.today().year - 10}-01-01"
+        base = {"doi": "10.1/base", "title": "Genome editing with CRISPR",
+                "abstract": "", "pub_date": older, "cited_by": 300,
+                "primary_node": "CRISPR and Genetic Engineering"}
+        foundation = {"doi": "10.1/foundation",
+                      "title": "A Programmable Dual-RNA-Guided DNA Endonuclease",
+                      "abstract": "", "pub_date": older, "cited_by": 17000,
+                      "primary_node": "CRISPR and Genetic Engineering"}
+        mock_search.side_effect = [
+            {"papers": [base], "total": 1, "source": "openalex"},
+            {"papers": [foundation], "total": 1, "source": "openalex"},
+        ]
+        result = live_search.query_classics("基因编辑", limit=6)
+        self.assertEqual([p["doi"] for p in result["papers"]],
+                         ["10.1/foundation", "10.1/base"])
+        self.assertEqual(mock_search.call_args.args[0], "crispr cas9")
+
+    @patch("app.sources.live_search._recent_citation_count")
+    @patch("app.sources.live_search._search_openalex")
+    def test_hot_uses_recent_citations_even_for_old_papers(self, mock_search, mock_count):
+        def paper(work_id, title, published, lifetime):
+            return {"doi": "10.1/" + work_id, "openalex_id": work_id,
+                    "title": title, "pub_date": published, "cited_by": lifetime,
+                    "journal": "Nature Physics", "abstract": "", "primary_node": ""}
+        rows = [paper("W1", "Quantum computing with ions", "2012-01-01", 900),
+                paper("W2", "Quantum computing with photons", "2026-09-01", 20),
+                paper("W3", "Quantum chemistry with photons", "2026-09-01", 10000)]
+        mock_search.return_value = {"source": "openalex", "total": 3, "papers": rows}
+        mock_count.side_effect = lambda work_id, *_: {"W1": 8, "W2": 2}[work_id]
+        result = live_search.query_hot("quantum computing")
+        self.assertEqual([p["openalex_id"] for p in result["papers"]], ["W1", "W2"])
+        self.assertEqual(result["papers"][0]["recent_citations"], 8)
+        self.assertEqual(result["papers"][0]["pub_date"], "2012-01-01")
+        self.assertEqual(mock_search.call_args.kwargs["sort"], "date")
+
+    @patch("app.http_client.request")
+    def test_hot_count_filters_citing_papers_by_date(self, mock_req):
+        mock_req.return_value = MagicMock(ok=True)
+        mock_req.return_value.json.return_value = {"meta": {"count": 7}}
+        self.assertEqual(live_search._recent_citation_count(
+            "W123", "2026-08-26", "2026-09-24"), 7)
+        filt = mock_req.call_args.kwargs["params"]["filter"]
+        self.assertIn("cites:W123", filt)
+        self.assertIn("from_publication_date:2026-08-26", filt)
+        self.assertIn("to_publication_date:2026-09-24", filt)
+
+    @patch("app.sources.live_search._search_openalex", return_value=None)
+    def test_hot_does_not_fake_recent_citations_from_crossref(self, _mock_openalex):
+        self.assertTrue(live_search.query_hot("quantum computing")["unavailable"])
+
+    @patch("app.sources.live_search._search_openalex")
+    def test_latest_ranks_papers_and_merges_repository_versions(self, mock_search):
+        def paper(doi, title, journal, day, abstract=""):
+            return {"doi": doi, "title": title, "journal": journal,
+                    "pub_date": day, "abstract": abstract, "cited_by": 0}
+
+        mock_search.side_effect = [
+            {"source": "openalex", "total": 201, "papers": [
+                paper("10.1/zenodo", "Quantum computing with neutral atoms",
+                      "Zenodo", "2026-09-24"),
+                paper("10.1/arxiv", "Quantum computing with neutral atoms",
+                      "arXiv", "2026-09-23"),
+                paper("10.1/journal", "Quantum computing with trapped ions",
+                      "Nature Physics", "2026-09-22"),
+                paper("10.1/noise", "Quantum chemistry with new materials",
+                      "Science", "2026-09-24", "We mention quantum computing."),
+            ]},
+            {"source": "openalex", "total": 201, "papers": []},
+        ]
+        result = live_search.query_global("quantum computing", sort="date", page_size=10)
+        self.assertTrue(result["ranked"])
+        self.assertEqual([p["doi"] for p in result["papers"]],
+                         ["10.1/arxiv", "10.1/journal", "10.1/noise"])
+        self.assertEqual(result["candidate_count"], 201)
+        self.assertEqual(mock_search.call_count, 2)
+
+    @patch("app.http_client.request")
+    def test_crossref_precise_fallback_verifies_titles(self, mock_req):
+        mock_req.return_value = MagicMock(ok=True)
+        mock_req.return_value.json.return_value = {"message": {
+            "total-results": 500, "items": [
+                {"DOI": "10.1/match", "title": ["Quantum computing with ions"]},
+                {"DOI": "10.1/noise", "title": ["Chemistry using quantum methods"]},
+            ]}}
+        result = live_search._search_crossref(
+            '"quantum computing"', mode="precise", page_size=10)
+        self.assertTrue(result["limited"])
+        self.assertEqual(result["total"], 1)
+        self.assertEqual([p["doi"] for p in result["papers"]], ["10.1/match"])
+
+    @patch("app.http_client.request")
+    def test_crossref_broad_fallback_uses_subject_not_boolean_syntax(self, mock_req):
+        mock_req.return_value = MagicMock(ok=True)
+        mock_req.return_value.json.return_value = {"message": {
+            "total-results": 0, "items": []}}
+        live_search._search_crossref(live_search._search_terms("固态电池"))
+        self.assertEqual(mock_req.call_args.kwargs["params"]["query"],
+                         "solid-state battery")
+
+    @patch("app.http_client.request")
+    def test_crossref_rejects_unrelated_solid_waste_electrodes(self, mock_req):
+        mock_req.return_value = MagicMock(ok=True)
+        mock_req.return_value.json.return_value = {"message": {
+            "total-results": 3068330, "items": [
+                {"DOI": "10.1/cement", "title": [
+                    "Mechanical performance of solid-waste-based cementitious structural electrodes"]},
+                {"DOI": "10.1/battery", "title": [
+                    "Interfaces in solid-state batteries"]},
+            ]}}
+        result = live_search._search_crossref(
+            live_search._search_terms("固态电池"), page_size=100)
+        self.assertEqual([p["doi"] for p in result["papers"]], ["10.1/battery"])
+        self.assertEqual(result["total"], 1)
+        self.assertTrue(result["limited"])
+
+    @patch("app.http_client.request")
+    def test_precise_search_accepts_detailed_query_without_title_filter(self, mock_req):
+        mock_req.return_value = MagicMock(ok=True)
+        mock_req.return_value.json.return_value = {"meta": {"count": 0}, "results": []}
+        result = live_search.query_global("solid state battery sulfide interface", mode="precise")
+        params = mock_req.call_args.kwargs["params"]
+        self.assertEqual(params["search"], "solid state battery sulfide interface")
+        self.assertNotIn("search.exact", params)
+        self.assertNotIn("title.search", params["filter"])
+        self.assertEqual(result["mode"], "precise")
+        self.assertGreater(live_search._topic_strength(
+            "solid state battery sulfide interface",
+            "solid state battery sulfide interface", {
+                "title": "Sulfide interface for solid-state batteries", "abstract": ""
+            }, "precise"), 0)
+        self.assertEqual(live_search._topic_strength(
+            "solid state battery sulfide interface",
+            "solid state battery sulfide interface", {
+                "title": "Solid-state battery cathodes", "abstract": ""
+            }, "precise"), 0)
+
+    @patch("app.http_client.request")
+    def test_classics_require_age_and_citations(self, mock_req):
+        cutoff_year = live_search.date.today().year - 5
+        mock_req.return_value = MagicMock(ok=True)
+        mock_req.return_value.json.return_value = {
+            "meta": {"count": 4}, "results": [
+                {"doi": "https://doi.org/10.1/old", "title": "Solid-state battery history",
+                 "publication_date": f"{cutoff_year - 1}-01-01", "cited_by_count": 200},
+                {"doi": "https://doi.org/10.1/irrelevant", "title": "Lithium ion battery history",
+                 "publication_date": f"{cutoff_year - 1}-01-01", "cited_by_count": 2000},
+                {"doi": "https://doi.org/10.1/new", "title": "Solid-state battery update",
+                 "publication_date": f"{cutoff_year + 1}-01-01", "cited_by_count": 900},
+                {"doi": "https://doi.org/10.1/uncited", "title": "Solid-state battery note",
+                 "publication_date": f"{cutoff_year - 1}-01-01", "cited_by_count": 0},
+            ]}
+        result = live_search.query_classics("solid state battery", mode="precise")
+        params = mock_req.call_args.kwargs["params"]
+        self.assertEqual(params["search"], "solid state battery")
+        self.assertEqual(params["sort"], "cited_by_count:desc")
+        self.assertIn("to_publication_date:" + result["cutoff"], params["filter"])
+        self.assertEqual([p["doi"] for p in result["papers"]], ["10.1/old"])
 
     @patch("app.http_client.request")
     def test_wikidata_translates_an_exact_chinese_concept(self, mock_req):
@@ -133,7 +333,7 @@ class TestLiveSearch(unittest.TestCase):
         }
         mock_req.side_effect = [openalex_resp, crossref_resp]
 
-        res = live_search.query_global("imagenet alexnet")
+        res = live_search.query_global("imagenet classification")
         self.assertEqual(res["source"], "crossref")
         self.assertEqual(len(res["papers"]), 1)
         p = res["papers"][0]

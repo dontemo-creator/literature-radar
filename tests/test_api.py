@@ -177,6 +177,12 @@ def run():
             check("未选方向也能全球检索",
                   mac.hit("/api/search/live?q=" + urllib.parse.quote("量子计算"))[1]["papers"][0]["doi"],
                   "10.1/global")
+        with patch.object(server.live_search, "query_hot", return_value={
+                "papers": [global_paper], "from_date": "2026-08-25",
+                "to_date": "2026-09-23", "source": "openalex"}):
+            check("未选方向也能查看近30天热门",
+                  mac.hit("/api/search/hot?q=" + urllib.parse.quote("量子计算"))[1]["papers"][0]["doi"],
+                  "10.1/global")
         check("全球论文可保存但不收藏",
               mac.hit("/api/paper/save", "POST", {"paper": global_paper, "starred": False})[1]["ok"], True)
         check("全球论文可标记已读",

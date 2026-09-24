@@ -153,11 +153,11 @@ def run():
             "document.getElementById('authView').hidden && "
             "document.getElementById('onboardView').hidden"))
         check("标题随方向变化",
-              b.js("document.getElementById('brandZh').textContent"), "固态电池文献雷达")
+              b.js("document.title"), "固态电池文献雷达")
         check("方向标签显示方向名",
               b.js("document.getElementById('fieldName').textContent"), "固态电池")
-        check("头像取显示名首字",
-              b.js("document.getElementById('avatarText').textContent"), "李")
+        check("账号入口是文字",
+              b.js("document.getElementById('avatarText').textContent"), "账号")
         check("手机媒体查询生效",
               b.js("window.matchMedia('(max-width: 860px)').matches"))
         check("视口宽度 390", b.js("document.documentElement.clientWidth"), 390)

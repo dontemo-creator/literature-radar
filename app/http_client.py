@@ -31,7 +31,7 @@ log = get_logger("http")
 
 # Minimum seconds between two requests to the same host.
 HOST_MIN_INTERVAL = {
-    "api.openalex.org": 0.55,
+    "api.openalex.org": 1.10,
     "api.crossref.org": 0.60,
     "www.ebi.ac.uk": 0.45,
     "api.semanticscholar.org": 1.60,

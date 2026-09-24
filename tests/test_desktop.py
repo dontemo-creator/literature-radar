@@ -83,7 +83,7 @@ def run():
         return 0
 
     seed()
-    def sample_global(q, page=1, page_size=25, sort="date"):
+    def sample_global(q, page=1, page_size=25, sort="date", mode="broad"):
         if not q:
             return {"papers": [], "total": 0, "pages": 0, "page": page,
                     "page_size": page_size, "source": "none", "search_terms": ""}
@@ -96,6 +96,15 @@ def run():
         }], "total": 1, "pages": 1, "page": page, "page_size": page_size,
                 "source": "openalex", "search_terms": '"solid-state battery"'}
     live_search.query_global = sample_global
+    def sample_hot(q, mode="broad", limit=12):
+        return {"papers": [{
+            "doi": "10.2/hot", "title": "Hot solid-state battery paper",
+            "authors": "A Researcher", "journal": "Example Journal",
+            "pub_date": "2026-09-22", "url": "https://doi.org/10.2/hot",
+            "abstract": "A recent paper.", "cited_by": 3, "recent_citations": 2,
+        }], "total": 1, "source": "openalex", "candidates_checked": 1,
+            "from_date": "2026-08-25", "to_date": "2026-09-23"}
+    live_search.query_hot = sample_hot
     httpd, port = server.serve("127.0.0.1", 8920)
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.2},
                      daemon=True).start()
@@ -130,6 +139,15 @@ def run():
             "document.querySelector('.rec-title').textContent.indexOf('solid-state battery') >= 0"))
         check("分页按全球结果工作", b.js("document.getElementById('pager').textContent.indexOf('1') >= 0"))
         b.shot(str(SHOTS / "02-global.png"))
+        check("打开近30天热门", b.tap("#tabHot"))
+        check("热门论文可见", b.wait_js(
+            "!document.getElementById('hotPane').hidden && "
+            "document.getElementById('hotList').textContent.indexOf('Hot solid-state battery paper') >= 0"))
+        check("热门视图写入地址", b.js("location.hash.indexOf('view=hot') >= 0"))
+        check("热门视图无横向溢出", b.js(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"))
+        b.shot(str(SHOTS / "02-hot.png"))
+        check("切回最新文献", b.tap("#tabRecent"))
         check("打开定向追踪设置", b.tap("#btnField"))
 
         print("\n-- 方向问询（桌面）--")
@@ -178,8 +196,7 @@ def run():
             "document.querySelectorAll('.rec:not(.skel)').length > 0", tries=60))
         check("分面区块数（3 固定 + 4 轴 + 期刊）",
               b.js("document.querySelectorAll('#facets .facet[data-facet]').length"), 8)
-        check("标题已改",
-              b.js("document.getElementById('brandZh').textContent"), "锂离子电池文献雷达")
+        check("标题已改", b.js("document.title"), "锂离子电池文献雷达")
         check("旧方向的轴已消失", b.js(
             "!document.querySelector('[data-facet=\"chemistry\"]')"))
         for axis in ("cathode", "anode", "electrolyte", "theme"):

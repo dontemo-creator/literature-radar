@@ -8,7 +8,7 @@
 
 <!-- installable web app: standalone window, home-screen icon, themed chrome -->
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#232c3c">
+<meta name="theme-color" content="#ffffff">
 <meta name="color-scheme" content="light">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -28,23 +28,9 @@
   <div class="gate-bg" aria-hidden="true"></div>
   <div class="gate-card">
     <div class="gate-brand">
-      <span class="brand-mark lg" aria-hidden="true">
-        <svg width="46" height="46" viewBox="0 0 34 34" fill="none">
-          <rect width="34" height="34" rx="10.5" fill="url(#glg)"/>
-          <path d="M8.5 24.5a10 10 0 0 1 10-10" stroke="#fff" stroke-opacity=".5"
-                stroke-width="1.7" stroke-linecap="round"/>
-          <path d="M8.5 24.5a16 16 0 0 1 16-16" stroke="#fff" stroke-opacity=".26"
-                stroke-width="1.7" stroke-linecap="round"/>
-          <circle cx="8.5" cy="24.5" r="2.4" fill="#fff"/>
-          <circle cx="24" cy="9.5" r="3.1" fill="#ffce8a"/>
-          <circle cx="24" cy="9.5" r="5.4" fill="#ffce8a" fill-opacity=".22"/>
-          <defs><linearGradient id="glg" x1="0" y1="0" x2="34" y2="34">
-            <stop stop-color="#4d8ada"/><stop offset="1" stop-color="#28518f"/>
-          </linearGradient></defs>
-        </svg>
-      </span>
       <div>
         <h1 class="gate-title">文献雷达</h1>
+        <p class="gate-overline">LITERATURE RADAR</p>
         <p class="gate-sub" id="authSub">登录后手机与电脑共享同一份文献库</p>
       </div>
     </div>
@@ -173,36 +159,11 @@
 <header class="masthead">
   <div class="masthead-inner">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true">
-        <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
-          <rect width="34" height="34" rx="10.5" fill="url(#lg)"/>
-          <rect width="34" height="34" rx="10.5" fill="url(#sheen)"/>
-          <path d="M8.5 24.5a10 10 0 0 1 10-10" stroke="#fff" stroke-opacity=".5"
-                stroke-width="1.7" stroke-linecap="round"/>
-          <path d="M8.5 24.5a16 16 0 0 1 16-16" stroke="#fff" stroke-opacity=".26"
-                stroke-width="1.7" stroke-linecap="round"/>
-          <path d="M8.5 24.5L24 9.5" stroke="#fff" stroke-opacity=".22" stroke-width="1.2"
-                stroke-linecap="round" stroke-dasharray="2 3"/>
-          <circle cx="8.5" cy="24.5" r="2.4" fill="#fff"/>
-          <circle cx="24" cy="9.5" r="3.1" fill="#ffce8a"/>
-          <circle cx="24" cy="9.5" r="5.4" fill="#ffce8a" fill-opacity=".22"/>
-          <defs>
-            <linearGradient id="lg" x1="0" y1="0" x2="34" y2="34">
-              <stop stop-color="#4d8ada"/><stop offset="1" stop-color="#28518f"/>
-            </linearGradient>
-            <linearGradient id="sheen" x1="0" y1="0" x2="14" y2="34">
-              <stop stop-color="#fff" stop-opacity=".18"/>
-              <stop offset=".6" stop-color="#fff" stop-opacity="0"/>
-            </linearGradient>
-          </defs>
-        </svg>
-      </span>
       <span class="brand-text">
         <span class="brand-zh" id="brandZh">文献雷达</span>
         <span class="brand-en" id="brandEn">Literature Radar</span>
       </span>
       <button class="fieldchip" id="btnField" type="button" title="切换研究方向">
-        <span class="fieldchip-ico" id="fieldIco" aria-hidden="true">🔋</span>
         <span class="fieldchip-name" id="fieldName">—</span>
         <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.8L5 6.8l3-3"
           stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"
@@ -251,8 +212,13 @@
   <div class="search-scope-bar">
     <div class="search-scope-tabs" role="tablist">
       <button class="scope-tab active" id="tabScopeLocal" type="button" role="tab" aria-selected="true" data-scope="local">本方向雷达</button>
-      <button class="scope-tab" id="tabScopeLive" type="button" role="tab" aria-selected="false" data-scope="live">全球学术检索 🌐</button>
+      <button class="scope-tab" id="tabScopeLive" type="button" role="tab" aria-selected="false" data-scope="live">全球学术检索</button>
     </div>
+  </div>
+  <div class="search-intro">
+    <p class="search-kicker">文献雷达 <span>›</span> 全球学术检索</p>
+    <h1>研究论文</h1>
+    <p>检索不同学科的新发表论文，并按日期、相关度或被引次数浏览。</p>
   </div>
   <div class="searchbar-inner">
     <div class="search-field">
@@ -269,6 +235,14 @@
     </div>
     <button class="btn-primary" id="btnSearch" type="button">检索</button>
     <button class="btn-quiet" id="btnReset" type="button">重置</button>
+  </div>
+  <div class="search-mode-row" id="searchModeRow" hidden>
+    <span class="mode-label">检索方式</span>
+    <div class="mode-options" aria-label="检索方式">
+      <button id="modeBroad" type="button" aria-pressed="true">泛搜</button>
+      <button id="modePrecise" type="button" aria-pressed="false">精搜</button>
+    </div>
+    <span class="mode-help" id="modeHelp">检索标题、摘要与全文，适合探索方向</span>
   </div>
   <div class="syntax-hint">
     多词为「与」关系 <code>Li6PS5Cl interface</code>　·　词组加引号
@@ -313,6 +287,12 @@
   </aside>
 
   <section class="results">
+    <div class="result-tabs" id="resultTabs" role="tablist" aria-label="文献类型" hidden>
+      <button id="tabRecent" type="button" role="tab" aria-selected="true">最新文献</button>
+      <button id="tabHot" type="button" role="tab" aria-selected="false">近 30 天热门</button>
+      <button id="tabClassics" type="button" role="tab" aria-selected="false">经典文献</button>
+    </div>
+    <div id="recentPane">
     <div class="resbar">
       <div class="rescount" id="resCount">正在载入…</div>
       <div class="resbar-spacer"></div>
@@ -341,6 +321,21 @@
     <div class="reclist" id="reclist"></div>
     <div class="pager" id="pager"></div>
     <button class="loadmore" id="btnLoadMore" type="button" hidden></button>
+    </div>
+    <section class="classics-pane hot-pane" id="hotPane" aria-label="近 30 天热门文献" hidden>
+      <div class="classics-head hot-head">
+        <h2 id="hotTitle">近 30 天热门</h2>
+        <p id="hotCriteria"></p>
+      </div>
+      <div class="classics-list" id="hotList"></div>
+    </section>
+    <section class="classics-pane" id="classicsPane" aria-label="经典文献" hidden>
+      <div class="classics-head">
+        <h2 id="classicsTitle">经典文献</h2>
+        <p id="classicsCriteria"></p>
+      </div>
+      <div class="classics-list" id="classicsList"></div>
+    </section>
   </section>
 </main>
 

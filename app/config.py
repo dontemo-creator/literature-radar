@@ -20,8 +20,8 @@ APP_NAME = "Literature Radar"
 APP_VERSION = "1.1.0"
 
 DEFAULTS = {
-    # OpenAlex asks for an e-mail to place you in the fast "polite pool".
-    # Any address works; it is only sent as a courtesy identifier.
+    # Optional free OpenAlex key. Set SSB_OPENALEX_API_KEY in the environment.
+    "openalex_api_key": "",
     "contact_email": "ssb-radar@localhost",
     "server_host": "127.0.0.1",
     "server_port": 8756,

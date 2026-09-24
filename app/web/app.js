@@ -13,7 +13,8 @@
 
 // ------------------------------------------------------------------ state
 var DEFAULTS = {
-  q: '', scope: 'local', sel: {}, journal: [], tier: 3, days: 0,
+  q: '', scope: 'local', mode: 'broad', view: 'recent',
+  sel: {}, journal: [], tier: 3, days: 0,
   sort: 'date', page: 1, page_size: 25,
   new_only: false, starred: false, unread: false, has_abs: false
 };
@@ -32,6 +33,10 @@ var openKids = {};            // chemistry parents expanded in the rail
 var showAllJournals = false;
 var showAllNodes = {};        // per facet: is the long list expanded
 var inflight = null;          // AbortController for the running search
+var classicInflight = null;
+var classicCache = {};
+var hotInflight = null;
+var hotCache = {};
 var pollTimer = null;
 var searchTimer = null;
 var refreshSeen = null;       // status snapshot when a refresh started
@@ -141,6 +146,8 @@ function stateToHash() {
   if (Number(state.page) > 1) p.set('page', state.page);
   if (Number(state.page_size) !== 25) p.set('ps', state.page_size);
   if (state.scope && state.scope !== 'local') p.set('scope', state.scope);
+  if (state.scope === 'live' && state.mode === 'precise') p.set('mode', 'precise');
+  if (state.scope === 'live' && state.q && state.view !== 'recent') p.set('view', state.view);
   ['new_only', 'starred', 'unread', 'has_abs'].forEach(function (k) {
     if (state[k]) p.set(k, '1');
   });
@@ -154,6 +161,8 @@ function hashToState() {
   var p = new URLSearchParams(raw);
   state.q = p.get('q') || '';
   state.scope = p.get('scope') === 'live' ? 'live' : 'local';
+  state.mode = p.get('mode') === 'precise' ? 'precise' : 'broad';
+  state.view = ['hot', 'classics'].indexOf(p.get('view')) >= 0 ? p.get('view') : 'recent';
   state.sel = {};
   p.forEach(function (value, key) {
     if (key.indexOf('f.') !== 0) return;
@@ -198,7 +207,138 @@ function buildLiveQuery() {
   p.set('page', state.page);
   p.set('page_size', Math.min(50, state.page_size));
   p.set('sort', state.sort === 'cited' ? 'cited' : (state.sort === 'date' ? 'date' : 'relevance'));
+  p.set('mode', state.mode);
   return p.toString();
+}
+
+function syncResultView() {
+  var available = state.scope === 'live' && !!state.q;
+  var hot = available && state.view === 'hot';
+  var classics = available && state.view === 'classics';
+  el('resultTabs').hidden = !available;
+  el('recentPane').hidden = hot || classics;
+  el('hotPane').hidden = !hot;
+  el('classicsPane').hidden = !classics;
+  el('appView').classList.toggle('classics-view', hot || classics);
+  el('tabRecent').setAttribute('aria-selected', hot || classics ? 'false' : 'true');
+  el('tabHot').setAttribute('aria-selected', hot ? 'true' : 'false');
+  el('tabClassics').setAttribute('aria-selected', classics ? 'true' : 'false');
+}
+
+function renderClassics(data) {
+  var box = el('classicsList');
+  if (data.unavailable) {
+    box.innerHTML = '<div class="classics-empty">学术索引暂时无法访问，请稍后再试。</div>';
+    return;
+  }
+  if (!data.papers || !data.papers.length) {
+    box.innerHTML = '<div class="classics-empty">暂未找到符合主题和发表时间条件的文献。试试泛搜，或输入更具体的英文术语。</div>';
+    return;
+  }
+  box.innerHTML = data.papers.map(function (p, i) {
+    return '<article class="classic-rec">' +
+      '<span class="classic-rank tnum">' + String(i + 1).padStart(2, '0') + '</span>' +
+      '<div class="classic-main">' +
+        '<h3><a href="' + esc(p.url) + '" target="_blank" rel="noopener noreferrer">' +
+          esc(p.title) + '</a></h3>' +
+        (p.authors ? '<p class="classic-authors">' + esc(p.authors) + '</p>' : '') +
+        '<p class="classic-meta"><span>' + esc(p.journal) + '</span>' +
+          '<span>' + esc(fmtDate(p.pub_date)) + '</span>' +
+          '<strong>被引 ' + num(p.cited_by) + '</strong></p>' +
+      '</div></article>';
+  }).join('');
+}
+
+function loadClassics() {
+  var q = state.q;
+  var mode = state.mode;
+  var key = mode + '\u0000' + q;
+  el('classicsTitle').textContent = '「' + q + '」的经典文献';
+  el('classicsCriteria').textContent = '标题或领域方法匹配 · 发表满 5 年 · 按被引次数排序；算法筛选的高被引候选，不代表公认必读。';
+  if (classicCache[key]) {
+    renderClassics(classicCache[key]);
+    return;
+  }
+  el('classicsList').innerHTML = '<div class="classics-empty">正在查找高被引文献…</div>';
+  var controller = new AbortController();
+  classicInflight = controller;
+  var params = new URLSearchParams({ q: q, mode: mode });
+  api('/api/search/classics?' + params.toString(), { signal: controller.signal })
+    .then(function (data) {
+      if (controller !== classicInflight || state.q !== q || state.mode !== mode ||
+          state.view !== 'classics') return;
+      if (data && data.error) throw new Error(data.detail || data.error);
+      if (!data.unavailable) classicCache[key] = data;
+      renderClassics(data);
+    })
+    .catch(function (err) {
+      if (err && (err.name === 'AbortError' || err.message === EXPIRED)) return;
+      el('classicsList').innerHTML = '<div class="classics-empty">经典文献加载失败：' +
+        esc(err.message || err) + '</div>';
+    });
+}
+
+function renderHot(data) {
+  var box = el('hotList');
+  if (data.unavailable) {
+    box.innerHTML = '<div class="classics-empty">学术索引暂时无法访问，请稍后再试。</div>';
+    return;
+  }
+  if (!data.papers || !data.papers.length) {
+    box.innerHTML = '<div class="classics-empty">已核对的候选论文中，近 30 天暂无可验证的新增引用。可试试其他关键词。</div>';
+    return;
+  }
+  box.innerHTML = data.papers.map(function (p, i) {
+    return '<article class="classic-rec hot-rec">' +
+      '<span class="classic-rank tnum">' + String(i + 1).padStart(2, '0') + '</span>' +
+      '<div class="classic-main">' +
+        '<h3><a href="' + esc(p.url) + '" target="_blank" rel="noopener noreferrer">' +
+          esc(p.title) + '</a></h3>' +
+        (p.authors ? '<p class="classic-authors">' + esc(p.authors) + '</p>' : '') +
+        '<p class="classic-meta"><span>' + esc(p.journal) + '</span>' +
+          '<span>' + esc(fmtDate(p.pub_date)) + '</span>' +
+          '<strong>近 30 天被引 ' + num(p.recent_citations) + '</strong>' +
+          (p.cited_by ? '<span>累计被引 ' + num(p.cited_by) + '</span>' : '') + '</p>' +
+        (p.abstract ? '<p class="hot-summary">' + esc(p.abstract) + '</p>' : '') +
+      '</div></article>';
+  }).join('');
+}
+
+function loadHot() {
+  var q = state.q;
+  var mode = state.mode;
+  var key = mode + '\u0000' + q;
+  el('hotTitle').textContent = '「' + q + '」近 30 天热门';
+  el('hotCriteria').textContent = '按近 30 天新增引用排序，论文可以发表于更早年份。';
+  var cached = hotCache[key];
+  if (cached && Date.now() - cached.time < 120000) {
+    el('hotCriteria').textContent = cached.criteria;
+    renderHot(cached.data);
+    return;
+  }
+  el('hotList').innerHTML = '<div class="classics-empty">正在核对主题论文的近 30 天新增引用…</div>';
+  var controller = new AbortController();
+  hotInflight = controller;
+  var params = new URLSearchParams({ q: q, mode: mode });
+  api('/api/search/hot?' + params.toString(), { signal: controller.signal })
+    .then(function (data) {
+      if (controller !== hotInflight || state.q !== q || state.mode !== mode ||
+          state.view !== 'hot') return;
+      if (data && data.error) throw new Error(data.detail || data.error);
+      var criteria = data.unavailable ? 'OpenAlex 暂不可用，无法核对近 30 天新增引用。' :
+        fmtDate(data.from_date) + ' 至 ' + fmtDate(data.to_date) +
+        ' 期间被引用 · 从 ' + num(data.candidates_checked || 0) +
+        ' 篇主题候选中核对 · OpenAlex 数据，收录可能滞后。' +
+        (data.partial ? '部分候选核对失败，本榜单不完整。' : '');
+      el('hotCriteria').textContent = criteria;
+      if (!data.unavailable) hotCache[key] = { data: data, time: Date.now(), criteria: criteria };
+      renderHot(data);
+    })
+    .catch(function (err) {
+      if (err && (err.name === 'AbortError' || err.message === EXPIRED)) return;
+      el('hotList').innerHTML = '<div class="classics-empty">热门文献加载失败：' +
+        esc(err.message || err) + '</div>';
+    });
 }
 
 function showSkeleton() {
@@ -217,9 +357,20 @@ function showSkeleton() {
 
 function runSearch(opts) {
   opts = opts || {};
+  if (!state.q || state.scope !== 'live') state.view = 'recent';
   stateToHash();
   syncScopeTabs();
   if (inflight) { try { inflight.abort(); } catch (e) {} }
+  if (classicInflight) { try { classicInflight.abort(); } catch (e) {} }
+  if (hotInflight) { try { hotInflight.abort(); } catch (e) {} }
+  if (state.scope === 'live' && state.view === 'hot') {
+    loadHot();
+    return;
+  }
+  if (state.scope === 'live' && state.view === 'classics') {
+    loadClassics();
+    return;
+  }
   inflight = new AbortController();
   var mine = inflight;
   if (!opts.quiet && !opts.append) showSkeleton();
@@ -295,7 +446,7 @@ function syncTabs() {
 function renderCount(d) {
   if (state.scope === 'live') {
     if (d.unavailable) {
-      el('resCount').textContent = '🌐 全球学术检索 · 数据源暂时不可用';
+      el('resCount').textContent = '全球学术检索 · 数据源暂时不可用';
       el('mobarCount').textContent = '暂不可用';
       el('btnSheetApply').textContent = '暂时无法检索';
       return;
@@ -308,7 +459,24 @@ function renderCount(d) {
     var range = shown ? '<span class="sub"> 第 ' + num(from) + '–' + num(from + shown - 1) + ' 条</span>' : '';
     var expanded = d.search_terms && d.search_terms !== state.q
       ? '<span class="sub" title="' + esc(d.search_terms) + '"> · 已扩展英文关键词</span>' : '';
-    el('resCount').innerHTML = '🌐 全球学术检索 ' + qLabel +
+    if (d.ranked) {
+      el('resCount').innerHTML = '全球学术检索 ' + qLabel +
+        ' · 本批 <b class="tnum">' + num(shown) + '</b> 篇标题或摘要匹配' +
+        '<span class="sub"> · 索引候选约 ' + num(d.candidate_count) + ' 条' +
+        (srcName ? ' · ' + srcName : '') + '</span>' + expanded;
+      el('mobarCount').innerHTML = '<b>' + num(shown) + '</b> 篇';
+      el('btnSheetApply').textContent = '查看本批 ' + num(shown) + ' 篇';
+      return;
+    }
+    if (d.limited) {
+      el('resCount').innerHTML = '全球学术检索 ' + qLabel +
+        ' · Crossref 备用结果 <b class="tnum">' + num(shown) +
+        '</b> 篇标题或摘要核对匹配<span class="sub"> · 仅核对当前候选批次</span>';
+      el('mobarCount').innerHTML = '<b>' + num(shown) + '</b> 篇';
+      el('btnSheetApply').textContent = '查看 ' + num(shown) + ' 篇';
+      return;
+    }
+    el('resCount').innerHTML = '全球学术检索 ' + qLabel +
       (state.q ? ' · 约 <b class="tnum">' + num(d.total) + '</b> 条结果' : '') + range +
       (srcName ? '<span class="sub"> · ' + srcName + '</span>' : '') + expanded;
     el('mobarCount').innerHTML = '<b>' + num(d.total) + '</b> 条';
@@ -662,17 +830,22 @@ function renderResults(d, append) {
         ? '<div class="empty"><h3>学术索引暂时无法访问</h3>' +
           '<p>OpenAlex 和 Crossref 当前都没有返回有效结果，请稍后重试。</p></div>'
         : !state.q
-        ? '<div class="empty"><h3>搜索任何学科的最新论文</h3>' +
-          '<p>输入研究主题、方法或关键词。试试 ' +
-          '<button type="button" class="example-query" data-example="固态电池">固态电池</button> ' +
-          '<button type="button" class="example-query" data-example="AI算法">AI算法</button> ' +
-          '<button type="button" class="example-query" data-example="量子计算">量子计算</button></p>' +
-          '<p>主题越具体，结果越准确。支持中文主题；英文关键词覆盖通常更完整。</p></div>'
+        ? '<div class="empty empty-discover"><p class="empty-kicker">开始检索</p>' +
+          '<h3>搜索任何学科的最新论文</h3>' +
+          '<p class="empty-lead">从一个研究主题出发，浏览全球学术索引中新发表的论文。</p>' +
+          '<div class="empty-queries"><span>试着检索</span>' +
+          '<button type="button" class="example-query" data-example="固态电池">固态电池</button>' +
+          '<button type="button" class="example-query" data-example="AI算法">AI 算法</button>' +
+          '<button type="button" class="example-query" data-example="量子计算">量子计算</button></div>' +
+          '<p class="empty-note">主题越具体，结果越准确。英文关键词的覆盖通常更完整。</p></div>'
+        : d.ranked
+        ? '<div class="empty"><h3>这批最新候选没有明确的标题或摘要匹配</h3>' +
+          '<p>可浏览下一批，或换成更具体的英文关键词。</p></div>'
         : '<div class="empty"><h3>全球学术库未检索到匹配文献</h3>' +
           '<p>试试更具体的主题，或改用英文关键词。</p></div>';
     } else {
       var globalBtn = state.q
-        ? '<p><button class="btn-primary" id="btnSwitchGlobal" type="button" style="margin-top:14px;padding:8px 18px;font-size:13.5px">在全球学术库中检索「' + esc(state.q) + '」 🌐</button></p>'
+        ? '<p><button class="btn-primary" id="btnSwitchGlobal" type="button" style="margin-top:14px;padding:8px 18px;font-size:13.5px">在全球学术库中检索「' + esc(state.q) + '」</button></p>'
         : '';
       box.innerHTML = '<div class="empty"><h3>当前方向雷达库中暂无匹配文献</h3>' +
         globalBtn +
@@ -706,6 +879,9 @@ function renderResults(d, append) {
     if (p.pages) vip.push(esc(p.pages));
     var meta = ['<span class="jname">' + esc(p.journal) + '</span>'];
     if (vip.length) meta.push('<span>' + vip.join('，') + '</span>');
+    if (state.scope === 'live' && p.cited_by > 0) {
+      meta.push('<span>被引 ' + num(p.cited_by) + '</span>');
+    }
     meta.push('<span class="date">' + esc(fmtDate(p.pub_date)) + '</span>');
 
     // the server tags each chip with the axis it came from, so a record shows
@@ -726,9 +902,11 @@ function renderResults(d, append) {
     }
 
     var absHtml;
+    var absToggle = '';
     if (p.abstract) {
-      absHtml = '<p class="abs clamped" data-abs="1">' + esc(p.abstract) + '</p>' +
-        '<button class="abs-toggle" type="button" data-expand="1">展开全文摘要</button>';
+      absHtml = '<p class="abs clamped" data-abs="1">' + esc(p.abstract) + '</p>';
+      absToggle = '<button class="abs-toggle" type="button" data-expand="1">' +
+        (state.scope === 'live' ? '查看摘要' : '展开全文摘要') + '</button>';
     } else {
       absHtml = '<p class="abs-none">该期刊未向公开数据库提供摘要，软件会在后续更新中继续尝试补全；' +
         '可点击标题查看原文摘要。</p>';
@@ -736,7 +914,11 @@ function renderResults(d, append) {
 
     return '<article class="rec' + (p.read_at ? ' isread' : '') +
         '" data-doi="' + esc(p.doi) + '">' +
-      '<div class="rec-num tnum">' + num(start + i + 1) + '</div>' +
+      '<div class="rec-index">' +
+        '<span class="rec-kind">研究论文</span>' +
+        (p.is_oa ? '<span class="rec-open">开放获取</span>' : '') +
+        '<time class="rec-pubdate">' + esc(fmtDate(p.pub_date)) + '</time>' +
+      '</div>' +
       '<div class="rec-main">' +
         '<h3 class="rec-title"><a href="' + esc(p.url) + '" target="_blank" ' +
           'rel="noopener noreferrer">' + esc(p.title) + '</a><span class="ext">↗</span></h3>' +
@@ -747,6 +929,7 @@ function renderResults(d, append) {
         (catHtml ? '<div class="cats">' + catHtml + '</div>' : '') +
         absHtml +
         '<div class="rowacts">' +
+          absToggle +
           '<a class="act-primary" href="' + esc(p.url) + '" target="_blank" ' +
             'rel="noopener noreferrer">查看原文 ↗</a>' +
           (p.is_oa && p.oa_url ? '<a class="act-oa" href="' + esc(p.oa_url) + '" target="_blank" rel="noopener noreferrer">PDF 全文 ↗</a>' : '') +
@@ -771,15 +954,15 @@ function renderResults(d, append) {
 function renderLoadMore(d) {
   var b = el('btnLoadMore');
   b.disabled = false;
-  var more = d.total - d.page * d.page_size;
+  var more = d.total - d.page * (d.ranked ? 200 : d.page_size);
   if (!isPhone() || more <= 0) { b.hidden = true; return; }
   b.hidden = false;
-  b.textContent = '加载更多（还有 ' + num(more) + ' 条）';
+  b.textContent = d.ranked ? '加载下一批主题匹配' : '加载更多（还有 ' + num(more) + ' 条）';
 }
 
 function renderPager(d) {
   if (d.pages <= 1) {
-    el('pager').innerHTML = d.total
+    el('pager').innerHTML = d.ranked ? '<span class="info">已浏览当前候选</span>' : d.total
       ? '<span class="info">共 ' + num(d.total) + ' 条，已全部显示</span>' : '';
     return;
   }
@@ -799,7 +982,8 @@ function renderPager(d) {
   });
   parts.push('<button type="button" data-page="' + (cur + 1) + '"' +
     (cur >= last ? ' disabled' : '') + '>下一页</button>');
-  parts.push('<span class="info">第 ' + cur + ' / ' + last + ' 页</span>');
+  parts.push('<span class="info">第 ' + cur + ' / ' + last +
+    (d.ranked ? ' 批' : ' 页') + '</span>');
   el('pager').innerHTML = parts.join('');
 }
 
@@ -827,14 +1011,12 @@ function dismissed(key) {
 function renderIdentity() {
   if (!ME) return;
   var zh = (FIELD && FIELD.zh) || '';
-  var en = (FIELD && FIELD.en) || '';
-  el('brandZh').textContent = zh ? (zh + '文献雷达') : '文献雷达';
-  el('brandEn').textContent = en ? (en + ' Literature Radar') : 'Literature Radar';
-  document.title = el('brandZh').textContent;
-  el('fieldIco').textContent = (FIELD && FIELD.icon) || '🌐';
+  el('brandZh').textContent = '文献雷达';
+  el('brandEn').textContent = 'Literature Radar';
+  document.title = zh ? zh + '文献雷达' : '文献雷达';
   el('fieldName').textContent = zh || '设置定向追踪';
   var name = ME.display_name || ME.username || '';
-  el('avatarText').textContent = (name.trim()[0] || '·').toUpperCase();
+  el('avatarText').textContent = '账号';
   el('btnAccount').title = name + '（点击管理账号）';
   el('menuName').textContent = name;
   el('menuSub').textContent = '@' + (ME.username || '');
@@ -949,6 +1131,7 @@ function registerWorker() {
 function setScope(mode) {
   if (mode === 'local' && !FIELD) { openOnboarding(); return; }
   state.scope = (mode === 'live') ? 'live' : 'local';
+  state.view = 'recent';
   state.page = 1;
   syncScopeTabs();
   runSearch();
@@ -957,6 +1140,13 @@ function setScope(mode) {
 function syncScopeTabs() {
   var isLive = state.scope === 'live';
   el('appView').classList.toggle('global-mode', isLive);
+  el('searchModeRow').hidden = !isLive;
+  el('modeBroad').setAttribute('aria-pressed', state.mode === 'broad' ? 'true' : 'false');
+  el('modePrecise').setAttribute('aria-pressed', state.mode === 'precise' ? 'true' : 'false');
+  el('modeHelp').textContent = state.mode === 'precise'
+    ? '输入更具体的研究问题或多个关键条件；结果须覆盖这些要点'
+    : '输入较宽的研究主题；结果仍须在标题或摘要中明确涉及该主题';
+  syncResultView();
   var tLocal = el('tabScopeLocal');
   var tLive = el('tabScopeLive');
   if (tLocal) {
@@ -974,6 +1164,11 @@ function syncScopeTabs() {
   if (isLive && state.page_size > 50) {
     state.page_size = 50; el('pageSize').value = '50';
   }
+  var dateLabel = isLive
+    ? '主题匹配优先 · 较新' : '出版日期：最新优先';
+  el('sort').querySelector('option[value="date"]').textContent = dateLabel;
+  el('sortMobile').querySelector('option[value="date"]').textContent =
+    isLive ? '主题优先' : '最新发表';
   ['new', 'journal', 'title'].forEach(function (value) {
     var option = el('sort').querySelector('option[value="' + value + '"]');
     if (option) option.disabled = isLive;
@@ -984,7 +1179,9 @@ function syncScopeTabs() {
   var qInput = el('q');
   if (qInput) {
     qInput.placeholder = isLive
-      ? '输入研究主题，如固态电池、AI算法、量子计算'
+      ? (state.mode === 'precise'
+          ? '输入详细问题，如固态电池 硫化物电解质 界面稳定性'
+          : '输入研究主题，如固态电池、AI算法、量子计算')
       : '检索标题、摘要、期刊、作者';
   }
   var rail = el('rail');
@@ -994,7 +1191,7 @@ function syncScopeTabs() {
       notice = document.createElement('div');
       notice.id = 'railLiveNotice';
       notice.className = 'rail-live-notice';
-      notice.innerHTML = '<div class="hint-title">🌐 全球多学科检索</div><div class="hint-text">输入任何学科的研究主题。使用更具体的英文术语，通常能得到更准确的结果。</div>';
+      notice.innerHTML = '<div class="hint-title">全球多学科检索</div><div class="hint-text">输入任何学科的研究主题。使用更具体的英文术语，通常能得到更准确的结果。</div>';
       var body = rail.querySelector('.rail-body') || rail;
       body.insertBefore(notice, body.firstChild);
     }
@@ -1010,6 +1207,26 @@ function wire() {
   if (el('tabScopeLive')) {
     el('tabScopeLive').addEventListener('click', function () { setScope('live'); });
   }
+  el('modeBroad').addEventListener('click', function () {
+    if (state.mode === 'broad') return;
+    state.mode = 'broad'; state.page = 1; runSearch();
+  });
+  el('modePrecise').addEventListener('click', function () {
+    if (state.mode === 'precise') return;
+    state.mode = 'precise'; state.page = 1; runSearch();
+  });
+  el('tabRecent').addEventListener('click', function () {
+    if (state.view === 'recent') return;
+    state.view = 'recent'; state.page = 1; runSearch();
+  });
+  el('tabHot').addEventListener('click', function () {
+    if (state.view === 'hot') return;
+    state.view = 'hot'; state.page = 1; runSearch();
+  });
+  el('tabClassics').addEventListener('click', function () {
+    if (state.view === 'classics') return;
+    state.view = 'classics'; state.page = 1; runSearch();
+  });
   el('q').addEventListener('input', function () {
     state.q = this.value.trim(); scheduleSearch();
   });
@@ -1197,7 +1414,8 @@ function wire() {
       var btn = t.closest('[data-expand]');
       if (p) {
         p.classList.toggle('clamped');
-        btn.textContent = p.classList.contains('clamped') ? '展开全文摘要' : '收起摘要';
+        btn.textContent = p.classList.contains('clamped')
+          ? (state.scope === 'live' ? '查看摘要' : '展开全文摘要') : '收起摘要';
       }
       return;
     }
@@ -1388,15 +1606,15 @@ function submitAuth(e) {
 }
 
 // ------------------------------------------------------ research direction
-function fieldCardHtml(f, current) {
+function fieldCardHtml(f, current, index) {
   var facets = (f.facets || []).map(function (x) {
     return '<span class="fc-chip">' + esc(x.zh) + ' ' + num(x.top) + '</span>';
   }).join('');
   return '<button class="fieldcard' + (current ? ' current' : '') +
       '" type="button" data-field="' + esc(f.id) + '">' +
     (current ? '<span class="fc-current">当前</span>' : '') +
+    '<span class="fc-index">' + String(index + 1).padStart(2, '0') + ' <span>/ 研究方向</span></span>' +
     '<span class="fc-top">' +
-      '<span class="fc-ico" aria-hidden="true">' + esc(f.icon || '📚') + '</span>' +
       '<span class="fc-name">' +
         '<span class="fc-zh">' + esc(f.zh) + '</span>' +
         '<span class="fc-en">' + esc(f.en) + '</span>' +
@@ -1412,12 +1630,12 @@ function fieldCardHtml(f, current) {
 function renderFieldGrid() {
   var cur = (ME && ME.field) || '';
   var presets = (fieldCatalog && fieldCatalog.presets) || [];
-  el('fieldGrid').innerHTML = presets.map(function (f) {
-    return fieldCardHtml(f, f.id === cur);
+  el('fieldGrid').innerHTML = presets.map(function (f, index) {
+    return fieldCardHtml(f, f.id === cur, index);
   }).join('');
   var custom = fieldCatalog && fieldCatalog.custom;
   if (custom) {
-    el('fieldGrid').insertAdjacentHTML('beforeend', fieldCardHtml(custom, true));
+    el('fieldGrid').insertAdjacentHTML('beforeend', fieldCardHtml(custom, true, presets.length));
   }
   var switching = !!(ME && ME.field);
   el('obKicker').textContent = switching ? '切换方向' : '可选功能';
@@ -1713,8 +1931,7 @@ function startApp() {
       renderIdentity();
       el('mastMeta').textContent = '跨学科实时检索';
       syncScopeTabs();
-      notices([noticeHtml('good', '<b>现在可以搜索任何学科</b> — ' +
-        '输入关键词查看最新论文；需要每日定向追踪时，点左上角「设置定向追踪」。')]);
+      notices([]);
       runSearch({ quiet: true });
       return;
     }

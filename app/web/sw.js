@@ -9,7 +9,7 @@
  */
 'use strict';
 
-var VERSION = 'literature-radar-v4';
+var VERSION = 'literature-radar-v9';
 var SHELL = [
   '/',
   '/static/styles.css',
